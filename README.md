@@ -2,7 +2,7 @@
 ```
 sudo apt-get install docker
 sudo docker pull yodarocks1/pythontutor:latest
-sudo docker run -it -p 8000:8000 pythontutor:latest
+sudo docker run -it -p 8000:8000 yodarocks1/pythontutor:latest
 ```
 Problems: [localhost:8000/problems](localhost:8000/problems)
 Admin: [localhost:8000/admin](localhost:8000/admin)
