@@ -11,5 +11,7 @@ RUN mkdir -p /home/pythontutor
 COPY . /home/pythontutor
 WORKDIR /home/pythontutor
 
+RUN pip install RestrictedPython
+
 CMD ["python3", "manage.py", "runserver", "0.0.0.0:8000"]
 
