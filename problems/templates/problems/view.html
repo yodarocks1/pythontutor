@@ -1,0 +1,119 @@
+<html lang="en">
+    <head>
+        <title>View Problem: {{ problem.name }}</title>
+        {% include "base/head.html" %}
+        {% include "markdown_rendering.html" %}
+        {% include "monaco.html" with identifier=problem.pk %}
+    </head>
+    <body>
+        <h1>Problem: {{ problem.name }}</h1>
+        <h2>Design Requirements</h2>
+        {{ problem.design_requirements|json_script:"design-requirements" }}
+        <div class="render-markdown" data-from-json="design-requirements"></div>
+        <h2>Editor</h2>
+        {% include "monaco_editor.html" with use_hints=True use_main=True use_submit=True use_save=True use_test=True languages=problem.languages.all html_id="code" starter_code=problem.starter_code %}
+        <div id="hint"></div>
+        
+        {% include "base/foot.html" %}
+        {% csrf_token %}
+        <script type="text/javascript">
+            class ProblemProvider extends Provider {
+                constructor(displayF) {
+                    super();
+                    this.displayF = displayF;
+                }
+
+                hint(editorGroup, activeEditor) {
+                    this.#send("{% url 'hint' slug=problem.slug pk=problem.pk %}", editorGroup, activeEditor,
+                        []);
+                    return true;
+                }
+                test(editorGroup, activeEditor) {
+                    this.#send("{% url 'test' slug=problem.slug pk=problem.pk %}", editorGroup, activeEditor,
+                        ["active", "selection"]);
+                }
+                submit(editorGroup, activeEditor) {
+                    this.#send("{% url 'submit' slug=problem.slug pk=problem.pk %}", editorGroup, activeEditor,
+                        ["active", "selection"]);
+                }
+                save(editorGroup, activeEditor) {
+                    this.#send("{% url 'save' slug=problem.slug pk=problem.pk %}", editorGroup, activeEditor,
+                        ["active", "selection"], false);
+                }
+                async #send(url, editorGroup, activeEditor, exclude=[], showOutput=true) {
+                    let data = editorGroup.data();
+                    let outputEditor = editorGroup.outputEditor;
+                    for (let k of exclude) {
+                        if (k in data) delete data[k];
+                    }
+                    let csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
+                    let r = await fetch(url, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-CSRFToken": csrf,
+                        },
+                        body: JSON.stringify(data),
+                    });
+                    if (showOutput) {
+                        let j = await r.json();
+                        if (outputEditor) {
+                            if ("errors" in j && j.errors.length > 0) {
+                                let k = {...j};
+                                outputEditor.code = JSON.stringify({
+                                    "errors": j["errors"],
+                                    "output": j["output"],
+                                }, null, 4);
+                                monaco.editor.setModelLanguage(outputEditor.editor.getModel(), "json");
+                            } else {
+                                outputEditor.code = j["output"];
+                                monaco.editor.setModelLanguage(outputEditor.editor.getModel(), "plaintext");
+                            }
+                        }
+                        if ("decorations" in j) {
+                            let decs_map = new Map();
+                            for (let decoration of j["decorations"]) {
+                                let e = decoration[0]
+                                if (e === "__main__") e = activeEditor;
+                                else if (e === "__output__") e = outputEditor;
+                                else e = editorGroup.editors[e];
+                                if (!decs_map.has(e)) decs_map.set(e, []);
+                                let range = decoration[1].map(x => (x < 1 ? Infinity : x));
+                                if ("hoverMessage" in decoration[2]) {
+                                    decoration[2]["hoverMessage"] = {
+                                        "value": decoration[2]["hoverMessage"],
+                                    }
+                                }
+                                let l = decs_map.get(e).push({
+                                    "range": {
+                                        "startLineNumber": range[0],
+                                        "startColumn": range[1],
+                                        "endLineNumber": range[2],
+                                        "endColumn": range[3],
+                                    },
+                                    "options": decoration[2],
+                                });
+                            }
+                            for (let editor of editorGroup.editors) {
+                                if (decs_map.has(editor))
+                                    editor.decorations = decs_map.get(editor);
+                                else editor.decorations = [];
+                            }
+                            if (decs_map.has(outputEditor))
+                                outputEditor.decorations = decs_map.get(outputEditor);
+                            else outputEditor.decorations = [];
+                            if (decs_map.has(activeEditor))
+                                activeEditor.decorations = decs_map.get(activeEditor);
+                            else activeEditor.decorations = [];
+                        }
+                        this.displayF(j["markdownDisplay"].replaceAll("\\u", "%u"));
+                    }
+                }
+            }
+            window.provider = new ProblemProvider(markdown => {
+                let markdownDiv = document.getElementById("hint");
+                markdownDiv.innerHTML = DOMPurify.sanitize(md.render(markdown));
+            });
+        </script>
+    </body>
+</html>

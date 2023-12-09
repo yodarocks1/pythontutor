@@ -1,0 +1,17 @@
+<html lang="en">
+    <head>
+        <title>All Problems</title>
+    </head>
+    <body>
+        {% if problems %}
+        <h1>Available Problems:</h1>
+        <ul>
+            {% for problem in problems %}
+            <li><a href="{{ problem.get_absolute_url }}">{{ problem.name }}</a> ({{ problem.language }})</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p>There are currently no available problems</p>
+        {% endif %}
+    </body>
+</html>

@@ -1,0 +1,680 @@
+<!-- Monaco CSS -->
+<link rel="stylesheet" data-name="vs/editor/editor.main" href="/static/monaco-editor-0.23.0/package/min/vs/editor/editor.main.css">
+
+<!-- Monaco JS -->
+<script>var require = { paths: { 'vs': '/static/monaco-editor-0.23.0/package/min/vs' } };</script>
+<script src="/static/monaco-editor-0.23.0/package/min/vs/loader.js"></script>
+<script src="/static/monaco-editor-0.23.0/package/min/vs/editor/editor.main.nls.js"></script>
+<script src="/static/monaco-editor-0.23.0/package/min/vs/editor/editor.main.js"></script>
+
+
+<script type="text/javascript">
+    function getIdentifier() {
+        return "{{ identifier }}";
+    }
+
+    var allEditors = {}
+
+    var x = null;
+
+    class IdentifiedLocalStorage {
+        #data = {};
+        persistent = false;
+        constructor(identifyFunc, useObject=False) {
+            this.identify = identifyFunc;
+            if (!useObject && localStorage) {
+                this.#data = localStorage;
+                this.persistent = true;
+            }
+            return new Proxy(this, this);
+        }
+        get(_, k) {
+            if (k === "persistent") return this.persistent;
+            k = k.split(",");
+            return this.#data[this.identify(k)];
+        }
+        has(_, k) {
+            return this.identify(k) in this.#data;
+        }
+        set(_, k, v) {
+            return this.#data[this.identify(k)] = v;
+        }
+    }
+
+    class JSONProxy {
+        #getter = undefined;
+        #setter = undefined;
+        constructor(getter, setter) {
+            this.#getter = getter;
+            this.#setter = setter;
+            return new Proxy(this, this);
+        }
+        get json() { return JSON.parse(this.#getter()); }
+        set json(value) { this.#setter(JSON.stringify(value)); }
+        get str() { return this.#getter(); }
+        set str(value) { this.#setter(value); }
+        get(_, k) {
+            return this.json[k];
+        }
+        set(_, k, v) {
+            let internal = this.json;
+            internal[k] = v;
+            this.json = internal;
+        }
+        has(_, k) {
+            return k in this.json;
+        }
+        deleteProperty(_, k) {
+            let internal = this.json;
+            delete internal[k];
+            this.json = internal;
+        }
+    }
+
+    class Provider {
+        hint(editorGroup, activeEditor) { throw new Error("Provider does not handle hints"); }
+        test(editorGroup, activeEditor) { throw new Error("Provider does not handle testing"); }
+        submit(editorGroup, activeEditor) { throw new Error("Provider does not handle submission"); }
+        save(editorGroup, activeEditor) { throw new Error("Provider does not handle save event"); }
+    }
+
+    class EditorGroup {
+        active = null;
+        #linkedInputs = [];
+
+        constructor(name, el, allowNewTabs=True, useHints=True, useSubmit=True, useSave=True, useTest=True, startingCodes={}) {
+            this.name = name;
+            this.el = el;
+            this.allowNewTabs = allowNewTabs;
+            this.useHints = useHints;
+            this.useSubmit = useSubmit;
+            this.useSave = useSave;
+            this.useTest = useTest;
+
+            this.selectorsDiv = el.querySelector(".monaco-tab-selectors");
+            this.newTabButton = el.querySelector(".monaco-tab-add");
+            this.languageSelect = el.querySelector(".monaco-language-selector");
+            this.contentDiv = el.querySelector(".monaco-content-area");
+            this.mainSelect = el.querySelector(".monaco-main-selector");
+            this.outputDiv = el.querySelector(".monaco-output-area");
+            
+            this.editors = [];
+            this.outputEditor = null;
+            this.startingCodes = startingCodes;
+            
+            this.#setup();
+        }
+
+        get provider() {
+            return window.provider;
+        }
+        get language() {
+            if (!this.languageSelect) return null;
+            return this.languageSelect.value.toLowerCase();
+        }
+        get main() {
+            if (!this.mainSelect) return null;
+            return this.mainSelect.value;
+        }
+        get selection() {
+            return this.active.editor.getSelection();
+        }
+
+        linkFormInput(input, editor_name=null) {
+            if (editor_name === null) {
+                input.value = this.toString();
+                this.#linkedInputs.push(input);
+            } else {
+                input.value = this.editors[editor_name].code;
+                this.editors[editor_name].editor.onDidChangeModelContent((e) => {
+                    input.value = this.editors[editor_name].code;
+                });
+            }
+        }
+        toString() {
+            let o = {};
+            for (let name in this.editors) {
+                o[name] = this.editors[name].code;
+            }
+            return JSON.stringify(o);
+        }
+        data() {
+            let o = {"code": {}};
+            for (let name in this.editors) {
+                o["code"][name] = this.editors[name].code;
+            }
+            o["main"] = this.main;
+            o["active"] = this.active.name;
+            o["language"] = this.language;
+            o["selection"] = this.selection;
+            return o;
+        }
+
+        #setup() {
+            this.#local = new IdentifiedLocalStorage(k => this.identify(k), !this.useSave);
+            
+            if (this.outputDiv) {
+                this.outputEditor = new OutputEditor(this, this.outputDiv);
+            }
+            if (this.useSave) this.el.querySelector(".monaco-btn-save").onclick = () => {this.user_save()};
+            if (this.useHints) this.el.querySelector(".monaco-btn-hint").onclick = () => {this.user_hint()};
+            if (this.useTest) this.el.querySelector(".monaco-btn-test").onclick = () => {this.user_test()};
+            if (this.useSubmit) this.el.querySelector(".monaco-btn-submit").onclick = () => {this.user_submit()};
+            if (this.allowNewTabs) this.el.querySelector(".monaco-tab-add").onclick = () => {this.user_createTab()};
+
+            if (this.openTabs.length === 0) {
+                this.openTabs = Object.keys(this.startingCodes);
+            }
+
+            this.load();
+        }
+
+        hintsUsed = 0;
+        save() {
+            for (let editor in this.editors) {
+                this.editors[editor].localStorage["code"] = this.editors[editor].code;
+            }
+            if (this.useHints) this.localStorage["hintsUsed"] = this.hintsUsed;
+            if (this.mainSelect) this.localStorage["main"] = this.mainSelect.value;
+
+            let savedOnServer = false;
+            if (this.active.provider) {
+                savedOnServer = this.active.provider.save(this, this.active);
+            } else if (this.provider) {
+                savedOnServer = this.provider.save(this, this.active);
+            }
+
+            return [this.localStorage.persistent, savedOnServer];
+        }
+        load() {
+            for (let openTab of this.openTabs) {
+                this.createTab(openTab);
+            }
+            if (this.useHints) {
+                this.hintsUsed = 0;
+                if ("hintsUsed" in this.localStorage) {
+                    this.hintsUsed = this.localStorage["hintsUsed"];
+                    this.el.querySelector(".monaco-hint-count").textContent = this.hintsUsed;
+                }
+            }
+            return true;
+        }
+
+        #local = null;
+        get localStorage() {
+            return this.#local;
+        }
+        openTabs = new JSONProxy(
+            () => { return this.localStorage["openTabs"] || "[]"; },
+            (v) => { this.localStorage["openTabs"] = v; }
+        );
+
+        // User prompting
+        user_createTab() {
+            name = prompt("File name:");
+            if (name === null || name === "") return;
+            if (name.startsWith("_")) {
+                alert("File names cannot start with an underscore (\"_\")");
+                return this.user_createTab();
+            }
+
+            let success = this.createTab(name);
+
+            if (!success) {
+                alert("A file by that name already exists");
+            }
+        }
+
+        user_deleteTab(name) {
+            let sure = confirm("Are you sure you want to close this tab (" + name + ")? Progress may be lost!\nNote: If this tab has been 'Saved for Later', creating a new tab of the same name will restore the saved version.");
+            if (!sure) return;
+
+            let success = this.deleteTab(name);
+
+            if (!success) {
+                alert("Tab could not be deleted because the tab you requested deletion of (" + name + ") does not exist. Please report this error to the website manager.");
+            }
+        }
+
+        user_switchTab(name) {
+            let success = this.switchTab(name);
+            if (!success) {
+                alert("Could not switch to the requested tab (" + name + ") because it supposedly does not exist. Please report this error to the website manager.");
+            }
+        }
+
+        user_save() {
+            let success = this.save();
+            if (success[0] && success[1]) {
+                alert("Your progress has been saved.\nYour progress will be available after sign-in on any device.");
+            } else if (success[0]) {
+                alert("Your progress has been saved locally.\nNote: Progress will only be available on this computer. Do NOT clear your cache!");
+            } else if (success[1]) {
+                alert("Your progress has been saved on the server.\nYour progress will be available after sign-in on any device.");
+            } else {
+                alert("Your browser doesn't support local storage. Progress was NOT saved!!!");
+            }
+        }
+
+        // Server actions
+        user_hint() {
+            if (this.useHints) {
+                this.hintsUsed++;
+                this.localStorage["hintsUsed"] = this.hintsUsed;
+                this.el.querySelector(".monaco-hint-count").textContent = this.hintsUsed;
+
+                if (this.active.provider) {
+                    this.active.provider.hint(this, this.active);
+                } else if (this.provider) {
+                    this.provider.hint(this, this.active);
+                }
+            }
+        }
+        user_test() {
+            if (this.active.provider) {
+                this.active.provider.test(this, this.active);
+            } else if (this.provider) {
+                this.provider.test(this, this.active);
+            }
+        }
+        user_submit() {
+            if (this.active.provider) {
+                this.active.provider.submit(this, this.active);
+            } else if (this.provider) {
+                this.provider.submit(this, this.active);
+            }
+        }
+
+        // Tab management
+        createTab(name) {
+            if (name in this.editors) return false;
+
+            let code = this.localStorage[["editor", name, "code"]];
+            if (code === null || code === undefined) {
+                if (name in this.startingCodes) {
+                    code = this.startingCodes[name];
+                } else {
+                    code = "";
+                }
+            }
+            let editor = new Editor(this, name, this.language, 'vs-dark', code);
+            this.editors[name] = editor;
+
+            let openTabs = this.openTabs;
+            if (!openTabs.includes(name)) {
+                openTabs.push(name);
+                this.openTabs = openTabs;
+            }
+            
+            if (this.active === null) this.switchTab(name);
+
+            return true;
+        }
+
+        deleteTab(name) {
+            if (!(name in this.editors)) return false;
+
+            let editor = this.editors[name];
+            if (this.active === editor) {
+                this.active = null;
+                let k = Object.keys(editors);
+                if (k.length > 0) this.switchTab(k[0]);
+            }
+            editor.destroy();
+            delete this.editors[name];
+
+            let openTabs = this.openTabs;
+            openTabs.splice(this.openTabs.indexOf(name), 1);
+            this.openTabs = openTabs;
+
+            return true;
+        }
+
+        switchTab(name) {
+            if (!(name in this.editors)) return false;
+
+            if (this.active !== null) {
+                this.active.hide();
+            }
+            this.active = this.editors[name];
+            this.active.show();
+
+            return true;
+        }
+
+        // Helper functions
+        identify(key) {
+            if (arguments.length === 0) {
+                return getIdentifier() + "." + this.name;
+            } else if (typeof key === "object") {
+                return this.identify() + "." + key.join('.');
+            } else {
+                return this.identify() + "." + Array.from(arguments).join('.');
+            }
+        }
+
+        // Used by Editor class
+        get prefix() {
+            return this.name.toLowerCase()
+                .replace(/[^\w ]+/g, '')
+                .replace(/ +/g, '-');
+        }
+        addSelector(selector) {
+            this.selectorsDiv.insertBefore(selector, this.newTabButton);
+        }
+        addContentBox(content) {
+            this.contentDiv.appendChild(content);
+        }
+        addMainOption(option) {
+            if (this.mainSelect) this.mainSelect.appendChild(option);
+        }
+        addEditor(editor) {
+            this.languageSelect.onchange = () => {
+                monaco.editor.setModelLanguage(editor.getModel(), this.language);
+            }
+        }
+    }
+
+    class Editor {
+        #local = null;
+        constructor(parent, name, language, theme='vs-dark', code=undefined, lockedLines=0) {
+            this.parent = parent;
+            this.name = name;
+            this.language = language;
+            this.theme = theme;
+            this.start_code = code;
+            this.lockedLines = lockedLines;
+
+            this.#local = new IdentifiedLocalStorage(k => this.identify(k), !this.parent.useSave);
+
+            this.createContentBox();
+            this.createSelector();
+            this.createEditor();
+            this.createOption();
+        }
+        get code() {
+            if (this.lockedLines > 0) {
+                return this.editor.getModel().getValueInRange(new monaco.Range(this.#lockedLines, 0, Infinity, Infinity));
+            }
+            return this.editor.getValue();
+        }
+        get localStorage() { return this.#local; }
+
+        #lockedLines = 0;
+        #readonlyRanges = [new monaco.Range(0,0,0,1)];
+        get #readonlyRangesEnd() {
+            let result = [];
+            for (let ror of this.#readonlyRanges) {
+                result.push(new monaco.Range(ror.endLinNumber, 0, ror.endLineNumber, ror.endColumn));
+            }
+            return result;
+        }
+        get #readonlyRangesMin() {
+            let result = [];
+            for (let ror of this.#readonlyRanges) {
+                result.push(new monaco.Range(ror.startLineNumber, ror.startColumn, ror.endLineNumber - 1, Infinity));
+            }
+            return result;
+        }
+        get lockedLines() {
+            return this.#lockedLines - 1;
+        }
+        #lockDecorations = []
+        set lockedLines(value) {
+            this.#lockedLines = value + 1;
+            this.#readonlyRanges[0].endLineNumber = value + 1;
+            if (this.editor) {
+                let dec = []
+                for (let ror of this.#readonlyRangesMin) {
+                    if (ror.endLineNumber > 0) {
+                        dec.push({
+                            range: ror,
+                            options: {
+                                className: 'editor-line-readonly',
+                            },
+                        })
+                    }
+                }
+                this.#lockDecorations = this.editor.deltaDecorations(this.#lockDecorations, dec);
+            }
+        }
+
+        #decorations = []
+        set decorations(value) {
+            this.#decorations = this.editor.deltaDecorations(this.#decorations, value);
+        }
+        createEditor() {
+            this.editor = monaco.editor.create(this.content, {
+                value: this.start_code,
+                language: this.language,
+                theme: this.theme,
+                automaticLayout: true,
+            });
+            this.editor.onDidChangeCursorSelection(_ => {
+                const selectionInLockedRange = this.editor.getSelections()?.some(selection => {
+                    return this.#readonlyRangesMin.some(readonlyRange => {
+                        return selection.intersectRanges(readonlyRange);
+                    });
+                });
+                this.editor.updateOptions({readOnly: selectionInLockedRange, readOnlyMessage: {value: 'Cannot edit locked lines.'}});
+            });
+            this.editor.onKeyDown(e => {
+                if (["Backspace"].includes(e.code)) {
+                    const selectionInPseudoBlockedRange = this.editor.getSelections()?.some(selection => {
+                        return this.#readonlyRangesEnd.some(pseudoRange => {
+                            return selection.intersectRanges(pseudoRange);
+                        });
+                    });
+                    if (selectionInPseudoBlockedRange) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                    }
+                }
+            });
+            this.lockedLines = this.lockedLines;
+            
+            window.onresize = () => {this.editor.layout({});};
+            this.parent.addEditor(this.editor);
+        }
+        createOption() {
+            this.option = document.createElement("option");
+            this.option.innerText = this.name;
+
+            this.parent.addMainOption(this.option);
+        }
+        createContentBox() {
+            this.content = document.createElement("div");
+            this.content.id = this.parent.prefix + "-" + name;
+            this.content.style.height = "400px";
+            this.content.style.display = "none";
+            
+            this.parent.addContentBox(this.content);
+        }
+        createSelector() {
+            this.selector = document.createElement("div");
+            this.selector.classList.add("bg-dark", "d-inline-block", "monaco-tab");
+            
+            let displayName = document.createElement("code");
+            displayName.textContent = this.name;
+            displayName.classList.add("h-100");
+            displayName.onclick = () => {this.parent.user_switchTab(this.name)};
+            this.selector.appendChild(displayName);
+
+            let closeButton = document.createElement("button");
+            closeButton.classList.add("btn", "btn-sm", "btn-dark");
+            closeButton.setAttribute("type", "button");
+            closeButton.innerHTML = "&times;";
+            if (this.parent.allowNewTabs) {
+                closeButton.onclick = () => {this.parent.user_deleteTab(this.name)};
+            } else {
+                closeButton.disabled = true;
+            }
+            this.selector.appendChild(closeButton);
+
+            this.parent.addSelector(this.selector);
+        }
+
+        identify(key) {
+            if (arguments.length === 0) {
+                return this.parent.identify("editor", this.name);
+            } else if (typeof key === "object") {
+                return this.identify() + "." + key.join('.');
+            } else {
+                return this.identify() + "." + Array.from(arguments).join('.');
+            }
+        }
+
+        show() {
+            this.content.style.display = null;
+            this.selector.setAttribute("active", "");
+            this.editor.focus();
+        }
+        hide() {
+            this.content.style.display = "none";
+            this.selector.removeAttribute("active");
+        }
+        destroy() {
+            this.editor.dispose();
+            this.content.remove();
+            this.selector.remove();
+            this.option.remove();
+        }
+    }
+    class OutputEditor {
+        constructor(parent, el, theme='vs-dark', value=undefined) {
+            this.parent = parent;
+            this.content = el;
+            this.name = "__output__";
+            this.language = "plaintext";
+            this.theme = theme;
+            if (this.value) {
+                this.value = value;
+            } else {
+                this.value = "";
+            }
+
+            this.createContentBox();
+            this.createEditor();
+        }
+        get code() { return this.editor.getValue(); }
+        set code(value) {
+            this.editor.setValue(value);
+            if (value && value.length > 0) {
+                this.content.style.display = null;
+                let lines = value.split("\n").length;
+                let height = 20 * lines;
+                if (height > 400) {
+                    this.content.style.height = "400px";
+                } else {
+                    this.content.style.height = height + "px";
+                }
+            } else {
+                this.content.style.display = "none";
+            }
+        }
+        #decorations = []
+        set decorations(value) {
+            this.#decorations = this.editor.deltaDecorations(this.#decorations, value);
+        }
+        createEditor() {
+            this.editor = monaco.editor.create(this.content, {
+                value: this.value,
+                language: this.language,
+                theme: this.theme,
+                automaticLayout: true,
+                readOnly: true,
+            });
+            window.onresize = () => {editor.layout({});};
+        }
+        createContentBox() {
+            this.content.style.height = "400px";
+            if (this.value.length > 0) {
+                this.content.style.display = null;
+            } else {
+                this.content.style.display = "none";
+            }
+        }
+    }
+    
+</script>
+
+<style type="text/css">
+    .monaco-tab {
+        padding: 0 0 0 11px;
+        border-radius: 16px 10px 0 0;
+        position: relative;
+        height: 31px;
+    }
+    .monaco-tab::before {
+        content: '';
+        position: absolute;
+        left: -16px;
+        bottom: 0;
+        height: 50%;
+        width: 16px;
+        background-color: inherit;
+    }
+    .monaco-tab::after {
+        content: '';
+        position: absolute;
+        left: -16px;
+        bottom: 0;
+        height: 50%;
+        width: 16px;
+        background-color: rgb(26.4,29.6,32.8);
+        border-radius: 0 0 100% 0;
+    }
+    .monaco-tab button {
+        border-radius: 0 10px 0 0;
+        position: relative;
+        z-index: 1;
+    }
+    .monaco-tab code {
+        padding: 6px 4px 0 0;
+    }
+    .monaco-tab:not([active]) {
+        margin: 0 4px 0 4px;
+        background-color: rgb(29.7,33.3,36.9) !important;
+        height: 33px;
+    }
+    .monaco-tab:not([active]) button {
+        display: none;
+    }
+    .monaco-tab:not([active]) code {
+        display: block;
+        padding-right: 10px;
+        background: inherit;
+        border-radius: 10px 10px 0 0;
+        position: relative;
+        z-index: 1;
+    }
+    .monaco-tab[active] {
+        margin: 0 2px 0 8px;
+    }
+    .monaco-tab-add, .monaco-tab-add button {
+        border-radius: 10px 10px 0 0;
+    }
+    label.monaco-main-label {
+        display: inline-block;
+        padding: 0;
+        float: none;
+        width: auto;
+    }
+    .monaco-language-selector {
+        color: goldenrod;
+        font-family: monospace;
+    }
+    .monaco-main-selector {
+        font-family: monospace;
+    }
+    .editor-line-readonly {
+        background-color: black;
+        opacity: 0.25;
+        z-index: 1;
+        pointer-events: none;
+    }
+    .error-underline {
+        border-bottom: 1pt dotted red;
+    }
+</style>
+

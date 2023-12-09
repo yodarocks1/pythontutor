@@ -1,0 +1,111 @@
+{% extends "admin/change_form.html" %}
+
+{% block extrahead %}
+{% include "markdown_rendering.html" %}
+{{ block.super }}
+{% include "monaco.html" %}
+{% include "base/head.html" %}
+<style type="text/css">
+    #content {
+        background: rgb(18, 18, 18);
+        color: white !important;
+    }
+    .monaco-tab-selectors {
+        background: rgb(18, 18, 18) !important;
+    }
+    .monaco-tab::after {
+        background: rgb(18, 18, 18) !important;
+    }
+    .deletelink {
+        height: fit-content !important;
+    }
+    .monaco-language-selector, .monaco-main-selector {
+        font-size: larger;
+    }
+    .dynamic-tests td.original p {
+        left: -1000px !important;
+        text-align: start;
+        padding: 0 !important;
+        height: 1rem !important;
+        width: calc(1000px + 100%);
+    }
+    .dynamic-tests td.original p a {
+        position: absolute;
+        left: 1000px !important;
+        font-size: 1em !important;
+    }
+    div.renderarea {
+        font-family: var(--bs-body-font-family);
+        font-weight: var(--bs-body-font-weight);
+        color: var(--bs-body-color);
+        background-color: var(--bs-body-bg);
+    }
+    div.renderarea *:not(code) {
+        font-size: var(--bs-body-font-size) !important;
+        line-height: var(--bs-body-line-height) !important;
+    }
+    div.renderarea ul, div.renderarea ol {
+        margin-left: 0;
+        padding-left: 2rem;
+    }
+    div.renderarea ul li {
+        list-style-type: square;
+    }
+    .monaco-editor button:not(.btn) {
+        vertical-align: text-top;
+    }
+    label {
+        position: relative;
+        z-index: 1;
+    }
+    nav {
+        box-sizing: unset;
+    }
+    #content {
+        height: 100%;
+    }
+    #footer {
+        padding: 0;
+    }
+</style>
+{% endblock %}
+{% block footer %}
+{{ block.super }}
+{% include "base/foot.html" %}
+<script type="text/javascript">
+    class ChangeProblemProvider extends Provider {
+        constructor(renderArea) {
+            super();
+            this.renderArea = renderArea;
+        }
+        test(editorGroup, activeEditor) {
+            if (activeEditor.language === "markdown") {
+                let html = DOMPurify.sanitize(md.render(activeEditor.code));
+                this.renderArea.innerHTML = html;
+            } else if (editorGroup.outputEditor) {
+                editorGroup.outputEditor.code = "<< Placeholder text >>\nSome level of testing may occur here in the future.\n     or it may not, and the button will be removed.";
+                monaco.editor.setModelLanguage(editorGroup.outputEditor.editor.getModel(), "plaintext");
+            }
+        }
+        save(editorGroup, activeEditor) { return false; }
+    }
+    let dre = document.getElementById("design_requirements-editor");
+    let renderArea = document.createElement("div");
+    renderArea.classList.add("py-2", "renderarea");
+    dre.parentElement.appendChild(renderArea);
+    window.provider = new ChangeProblemProvider(renderArea);
+
+    let ll = document.querySelector("select[name='languages']");
+    let llOptions = []
+    for (let l of ll.selectedOptions) {
+        let lOption = document.createElement("option");
+        let lObj = allLanguages[l.value];
+        lOption.value = lObj.code;
+        lOption.innerText = lObj.name;
+        llOptions.push(lOption);
+    }
+    allEditors['starter_code-editor'].languageSelect.append(...llOptions);
+    allEditors['starter_code-editor'].languageSelect.onchange();
+</script>
+{% endblock %}
+

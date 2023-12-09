@@ -1,0 +1,37 @@
+{% extends "admin/change_form.html" %}
+
+{% block extrahead %}{{ block.super }}
+{% include "monaco.html" %}
+{% include "base/head.html" %}
+<style type="text/css">
+    #content {
+        background: rgb(18, 18, 18);
+        color: white !important;
+    }
+    .monaco-tab-selectors {
+        background: rgb(18, 18, 18) !important;
+    }
+    .monaco-tab::after {
+        background: rgb(18, 18, 18) !important;
+    }
+    .deletelink {
+        height: fit-content !important;
+    }
+    .monaco-language-selector, .monaco-main-selector {
+        font-size: larger;
+    }
+    nav {
+        box-sizing: unset;
+    }
+    #content {
+        height: 100%;
+    }
+    #footer {
+        padding: 0;
+    }
+</style>
+{% endblock %}
+{% block extrafoot %}{{ block.super }}
+{% include "base/foot.html" %}
+{% endblock %}
+

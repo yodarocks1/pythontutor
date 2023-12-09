@@ -1,0 +1,32 @@
+<!-- MarkdownIt -->
+<script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.2/dist/markdown-it.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js" integrity="sha512-H+rglffZ6f5gF7UJgvH4Naa+fGCgjrHKMgoFOGmcPTRwR6oILo5R+gtzNrpDp7iMV3udbymBVjkeZGNz1Em4rQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!-- HighlightJS -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+<script type="text/javascript">
+    const md = new markdownit("commonmark", {
+        highlight: function (str, lang) {
+            if (lang && hljs.getLanguage(lang)) {
+                try {
+                    return hljs.highlight(str, { language: lang }).value;
+                } catch (__) {}
+            }
+            return ''; // use external default escaping
+        }
+    });
+</script>
+<script type="text/javascript">
+    window.addEventListener("load", () => {
+        for (let el of document.querySelectorAll(".render-markdown[data-from-json]")) {
+            let j = document.getElementById(el.getAttribute("data-from-json"));
+            el.innerHTML = DOMPurify.sanitize(md.render(JSON.parse(unescape(
+                j.textContent.replaceAll("\\u", "%u")))));
+            el.removeAttribute("data-from-json");
+            el.classList.remove("render-markdown");
+            j.remove();
+        }
+    });
+</script>
+

@@ -1,0 +1,171 @@
+<html lang="en">
+    <head>
+        <title>Edit Problem: {{ problem.name }}</title>
+        {% include "bootstrap.html" %}
+        <!-- MarkdownIt -->
+        <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.2/dist/markdown-it.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js" integrity="sha512-H+rglffZ6f5gF7UJgvH4Naa+fGCgjrHKMgoFOGmcPTRwR6oILo5R+gtzNrpDp7iMV3udbymBVjkeZGNz1Em4rQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <!-- HighlightJS -->
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+        <script type="text/javascript">
+            const md = new markdownit("commonmark", {
+                highlight: function (str, lang) {
+                    if (lang && hljs.getLanguage(lang)) {
+                        try {
+                            return hljs.highlight(str, { language: lang }).value;
+                        } catch (__) {}
+                    }
+                    return ''; // use external default escaping
+                }
+            });
+        </script>
+    
+        <!-- Monaco CSS -->
+        <link rel="stylesheet" data-name="vs/editor/editor.main" href="/static/monaco-editor-0.23.0/package/min/vs/editor/editor.main.css">
+    </head>
+    <body>
+        <button class="btn btn-outline-success position-fixed top-0 end-0" style="z-index: 5" type="button" onclick="publish()">Publish</button>
+        <h1>Problem: {{ problem.name }}</h1>
+        <h2>Design Requirements</h2>
+        <div>
+            <div class="bg-dark w-100 p-2">
+                <select class="bg-dark" style="color: goldenrod">
+                    <option>Markdown + HTML</option>
+                </select>
+                <button class="bg-dark ms-4" style="color: lightgreen" onclick="quicksaveReqs()" type="button">Quick-save</button>
+                <div class="form-check form-check-inline form-switch float-end">
+                    <input class="form-check-input" type="checkbox" style="color: rgb(127,50,50); background-color: currentColor; border-color: currentColor" checked disabled></input>
+                    <label class="form-check-label" style="color: rgb(180,71,71); font-weight: bold">Sanitized</label>
+                </div>
+            </div>
+            <div id="requirement-editor" style="height: 400px"></div>
+        </div>
+        <h2>Starting Code</h2>
+        <div>
+            <div class="bg-dark w-100 p-2">
+                <select class="bg-dark" style="color: goldenrod">
+                    <option>{{ problem.language }}</option>
+                </select>
+                <button class="bg-dark ms-4" style="color: lightblue" onclick="getHint()" type="button">Example Hint</button>
+                <button class="bg-dark ms-4" style="color: lightgreen" onclick="quicksaveCode()" type="button">Quick-save</button>
+            </div>
+            <div id="editor" style="height: 400px"></div>
+        </div>
+        
+        <div id="hint">
+            
+        </div>
+        
+        {% csrf_token %}
+        <script type="text/javascript">
+            function getReqEditorValue() {
+                if (reqEditor === undefined) return null;
+                return reqEditor.getValue();
+            }
+            function getEditorValue() {
+                if (editor === undefined) return null;
+                return editor.getValue();
+            }
+            function buildRequestBody() {
+                let csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
+                let reqs = getReqEditorValue()
+                let code = getEditorValue()
+                return "csrfmiddlewaretoken=" + encodeURIComponent(csrf)
+                    + "&reqs=" + encodeURIComponent(reqs)
+                    + "&submission=" + encodeURIComponent(code);
+            }
+            async function getHint() {
+                let r = await fetch("{% url 'hint' pk=problem.pk %}", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                    body: buildRequestBody(),
+                });
+                let hint = await r.text();
+                hint = unescape(hint.replaceAll("\\u", "%u"));
+                let hintDiv = document.getElementById("hint");
+                hintDiv.innerHTML = DOMPurify.sanitize(md.render(hint));
+            }
+            async function publish() {
+                let r = await fetch("{% url 'edit' pk=problem.pk %}", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                    body: buildRequestBody(),
+                });
+                if (r.ok) {
+                    alert("Published! " + r.status + ": " + r.statusText);
+                    localStorage.removeItem("editReqs{{ problem.pk }}");
+                    localStorage.removeItem("editCode{{ problem.pk }}");
+                } else {
+                    alert("Publish failed.\n" + r.status + ": " + r.statusText);
+                }
+            }
+            function quicksaveReqs() {
+                if (!localStorage) {
+                    alert("Your browser doesn't support local storage. Progress was NOT saved!!!");
+                } else {
+                    localStorage.setItem("editReqs{{ problem.pk }}", reqEditor.getValue());
+                }
+            }
+            function quicksaveCode() {
+                if (!localStorage) {
+                    alert("Your browser doesn't support local storage. Progress was NOT saved!!!");
+                } else {
+                    localStorage.setItem("editCode{{ problem.pk }}", editor.getValue());
+                }
+            }
+        </script>
+        
+        <!-- Monaco JS -->
+        <script>var require = { paths: { 'vs': '/static/monaco-editor-0.23.0/package/min/vs' } };</script>
+        <script src="/static/monaco-editor-0.23.0/package/min/vs/loader.js"></script>
+        <script src="/static/monaco-editor-0.23.0/package/min/vs/editor/editor.main.nls.js"></script>
+        <script src="/static/monaco-editor-0.23.0/package/min/vs/editor/editor.main.js"></script>
+        {{ problem.starter_code|json_script:"starter-code" }}
+        {{ problem.design_requirements|json_script:"design-requirements" }}
+        <script type="text/javascript">
+            // CREATE AN EDITOR
+            let startingCode = "";
+            if (localStorage && 'editCode{{ problem.pk }}' in localStorage) {
+                startingCode = localStorage.getItem("editCode{{ problem.pk }}");
+            } else {
+                startingCode = JSON.parse(unescape(
+                    document.getElementById("starter-code")
+                        .textContent.replace("\\u", "%u")));
+            }
+            var h_div = document.getElementById('editor');
+            var editor = monaco.editor.create(h_div, {
+                value: startingCode,
+                language: '{{ problem.language.lower }}',
+                theme: 'vs-dark',
+                automaticLayout: true,
+            });
+            // CREATE REQ EDITOR
+            let startingReqs = "";
+            if (localStorage && 'editReqs{{ problem.pk }}' in localStorage) {
+                startingReqs = localStorage.getItem("editReqs{{ problem.pk }}");
+            } else {
+                startingReqs = JSON.parse(unescape(
+                    document.getElementById("design-requirements")
+                        .textContent.replace("\\u", "%u")));
+            }
+            var r_div = document.getElementById('requirement-editor');
+            var reqEditor = monaco.editor.create(r_div, {
+                value: startingReqs,
+                language: 'markdown',
+                theme: 'vs-dark',
+                automaticLayout: true,
+            });
+            
+            window.onresize = () => {
+                editor.layout({});
+                reqEditor.layout({});
+            };
+        </script>
+    </body>
+</html>

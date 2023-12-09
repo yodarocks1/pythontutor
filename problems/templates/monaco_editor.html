@@ -1,0 +1,89 @@
+<div id="{{ html_id }}" class="monaco-editor">
+    <div class="monaco-tab-selectors" class="w-100 p-2 pb-0" style="background-color: rgb(26.4,29.6,32.8)">
+        <div class="bg-dark d-inline-block monaco-tab-add" active>
+            <button class="btn btn-sm btn-dark" type="button" {% if not allow_new_tabs %}disabled{% endif %}>+</button>
+        </div>
+    </div>
+    <div class="bg-dark w-100 p-2">
+        <select class="bg-dark monaco-language-selector" style="color: goldenrod">
+            {% if languages %}
+            {% for language in languages %}
+            <option value="{{ language.code }}">{{ language.name }}</option>
+            {% endfor %}
+            {% else %}
+            {{ all_languages|json_script }}
+            {% endif %}
+        </select>
+        {% if use_main %}
+        <label class="ms-4 monaco-main-label" for="{{ html_id }}-main" style="color: deeppink">Main Module:</label>
+        <select class="bg-dark monaco-main-selector" style="color: deeppink" id="{{ html_id }}-main">
+            
+        </select>
+        {% endif %}
+        {% if use_hints %}
+        <button class="bg-dark ms-4 monaco-btn-hint" style="color: lightblue" type="button">Hint (Used: <span class="monaco-hint-count">0</span>)</button>
+        {% endif %}
+        {% if use_test %}
+        <button class="bg-dark ms-4 monaco-btn-test" style="color: lightblue" type="button">Test</button>
+        {% endif %}
+        {% if use_submit %}
+        <button class="bg-dark ms-4 monaco-btn-submit" style="color: lightgreen" type="button">Submit</button>
+        {% endif %}
+        {% if use_save %}
+        <button class="bg-dark ms-4 monaco-btn-save" style="color: lightgreen" type="button">Save for Later</button>
+        {% endif %}
+    </div>
+    <div class="monaco-content-area" id="{{ html_id }}-editors"></div>
+    {% if starter_code %}
+    {{ starter_code|json_script }}
+    {% endif %}
+    <div class="monaco-output-area" style="border-top: 1pt solid var(--bs-dark)"></div>
+    {% if link_input %}
+    <input type="hidden" id="{{ link_input.0 }}" name="{{ link_input.0 }}"></input>
+    {% endif %}
+</div>
+
+<script type="text/javascript">
+    allEditors["{{ html_id }}"] = new EditorGroup(
+        "{{ html_id }}",
+        document.getElementById("{{ html_id }}"),
+        allowNewTabs={{ allow_new_tabs|yesno:"true,false" }},
+        useHints={{ use_hints|yesno:"true,false" }},
+        useSubmit={{ use_submit|yesno:"true,false" }},
+        useSave={{ use_save|yesno:"true,false" }},
+        useTest={{ use_test|yesno:"true,false" }},
+        {% if starter_code %}
+        startingCodes = JSON.parse(unescape(
+            document.getElementById("{{ html_id }}").querySelector(".monaco-content-area + script[type='application/json']")
+                .textContent.replace("\\u", "%u"))),
+        {% endif %}
+    );
+    {% if link_input %}
+    allEditors["{{ html_id }}"].linkFormInput(
+        document.getElementById("{{ link_input.0 }}"),
+        {% if link_input.1 %}
+        editor_name="{{ link_input.1 }}"
+        {% endif %}
+    );
+    {% endif %}
+    {% if givens %}
+    let givens = `{{ givens }}`.trim();
+    let el = document.createElement("div");
+    el.innerHTML = givens;
+    givens = el.innerText;
+    delete el;
+    let editors = allEditors["{{ html_id }}"].editors;
+    for (let name in editors) {
+        editors[name].editor.setValue(givens + "\n" + editors[name].code);
+        editors[name].lockedLines = givens.split("\n").length;
+    }
+    {% endif %}
+    {% if not languages %}
+    if (allLanguages === undefined) {
+        var allLanguages = JSON.parse(unescape(
+            document.getElementById("{{ html_id }}").querySelector(".monaco-language-selector script[type='application/json']")
+                .textContent.replace("\\u", "%u")));
+    }
+    {% endif %}
+</script>
+
